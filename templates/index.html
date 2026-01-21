@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Patient History Report</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; font-family: 'Segoe UI', sans-serif; }
+        /* Report Container styling */
+        .report-container { max-width: 1200px; margin: 0 auto; }
+        .header-section { 
+            border-bottom: 2px solid #334155; 
+            padding-bottom: 20px; 
+            margin-bottom: 30px; 
+            text-align: center;
+        }
+        .report-title { 
+            font-size: 2.5rem; 
+            font-weight: 800; 
+            letter-spacing: 1px;
+            background: -webkit-linear-gradient(#38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-transform: uppercase;
+        }
+        
+        /* Cards styling */
+        .stat-box { 
+            background: #1e293b; 
+            border: 1px solid #334155; 
+            border-radius: 12px; 
+            padding: 20px; 
+            text-align: center;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            height: 100%; /* Ensures equal height in rows */
+        }
+        .stat-label { color: #94a3b8; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; }
+        .stat-value { font-size: 2.2rem; font-weight: bold; margin-top: 10px; }
+        
+        /* Status Colors */
+        .status-normal { color: #4ade80; text-shadow: 0 0 10px rgba(74, 222, 128, 0.3); }
+        .status-risk { color: #f43f5e; text-shadow: 0 0 10px rgba(244, 63, 94, 0.3); animation: pulse 2s infinite; }
+        .status-error { color: #facc15; } /* Yellow for errors */
+        
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+
+        /* Simulation Controls Style */
+        .control-panel {
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid #475569;
+            border-radius: 50px;
+            padding: 10px 30px;
+            display: inline-block;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container py-5 report-container">
+    
+    <div class="header-section">
+        <h1 class="report-title">YOUR LAST 6 MONTH ANALYSIS REPORT</h1>
+        <p class="text-secondary mt-2">
+            Monitoring Period: <span class="text-info">{{ start_date|default:"--" }}</span> to <span class="text-info">{{ end_date|default:"--" }}</span>
+        </p>
+        <span class="badge bg-dark border border-secondary">Source: Wearable Sensor Data (csv)</span>
+        
+        <div class="mt-4">
+            <div class="control-panel">
+                <span class="text-white fw-bold me-3">⚡ LIVE CONTROLS:</span>
+                <a href="/simulate/normal/" class="btn btn-sm btn-outline-success rounded-pill px-3 me-2">✅ Normal</a>
+                <a href="/simulate/danger/" class="btn btn-sm btn-outline-danger rounded-pill px-3 me-2">⚠️ High Risk</a>
+                <a href="/simulate/unstable/" class="btn btn-sm btn-outline-warning rounded-pill px-3">Zig-Zag Unstable</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-5">
+        <div class="col-md-3">
+            <div class="stat-box">
+                <div class="stat-label">Overall Condition</div>
+                <div class="stat-value {% if 'RISK' in status %}status-risk{% elif 'ERROR' in status %}status-error{% else %}status-normal{% endif %}">
+                    {{ status }}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-box">
+                <div class="stat-label">Average Heart Rate</div>
+                <div class="stat-value text-white">{{ avg_bpm }} <span class="fs-6 text-muted">BPM</span></div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-box">
+                <div class="stat-label">Abnormality Score</div>
+                <div class="stat-value text-warning">{{ risk_score }}%</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-box">
+                <div class="stat-label">Highest Recorded</div>
+                <div class="stat-value text-danger">{{ max_bpm }} <span class="fs-6 text-muted">BPM</span></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="stat-box mb-4 p-3 text-start">
+        <h5 class="text-white mb-3 border-start border-4 border-info ps-3">Heart Rate Trends (180 Days)</h5>
+        <div id="trendChart" style="height: 450px;"></div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div class="stat-box p-3 text-start">
+                <h5 class="text-white mb-3 border-start border-4 border-warning ps-3">Frequency Analysis</h5>
+                <div id="histChart" style="height: 350px;"></div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="stat-box p-3 text-start">
+                <h5 class="text-white mb-3 border-start border-4 border-success">Daily Averages</h5>
+                <div id="dailyChart" style="height: 350px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Data ko pehle variable mein store karein (Error se bachne ke liye)
+    var trendData = {{ chart_trend|safe }};
+    var histData = {{ chart_hist|safe }};
+    var dailyData = {{ chart_daily|safe }};
+
+    // Check karein ki data exist karta hai ya nahi
+    if (trendData && trendData.data) {
+        Plotly.newPlot('trendChart', trendData.data, trendData.layout);
+    }
+    if (histData && histData.data) {
+        Plotly.newPlot('histChart', histData.data, histData.layout);
+    }
+    if (dailyData && dailyData.data) {
+        Plotly.newPlot('dailyChart', dailyData.data, dailyData.layout);
+    }
+</script>
+
+</body>
+</html>
